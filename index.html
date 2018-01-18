@@ -1,0 +1,301 @@
+<html>
+<head>
+<title>Anagram finder</title>
+<script type="text/javascript" src="js/jquery-1.11.2.min.js"></script>
+<script type="text/javascript" src="js/trie-data.js"></script>
+<script type="text/javascript" src="js/Bits-ds.js"></script>
+<script type="text/javascript">
+
+function addWord (word, list) {
+	var key = normalizeInput(word);
+	var len = word.length;
+	if (!(key in list)) {
+		list[key] = [];
+	}
+	list[key].push(word);
+
+	if (!list._wordLengths) {
+		list._wordLengths = {};
+	}
+
+	if (!(len in list._wordLengths)) {
+		list._wordLengths[len] = 0;
+	}
+
+	list._wordLengths[len] += 1;
+}
+
+function getAnagrams (prefix, letters, wordList, trieNode) {
+	if(trieNode.final && prefix) {
+		addWord(prefix, wordList);
+	}
+
+	for (var i=0; i<letters.length; ++i) {
+		if(i>0 && letters[i]==letters[i-1]) {
+			continue;
+		}
+
+		var childNode = trieNode.getChildByLetter(letters[i]);
+		if (childNode) {
+				var otherLetters = letters.substring(0, i) + letters.substr(i+1);
+				getAnagrams(prefix+letters[i], otherLetters, wordList, childNode);
+		}
+	}
+}
+
+function normalizeInput (str) {
+	str = str.toLowerCase().replace(/[^a-z]/g, "");
+	var chars = str.split("");
+	chars.sort();
+	return chars.join("");
+}
+
+function isSubstr (str1, str2) {
+	return str2.indexOf(str1) >= 0 ? true : false;
+}
+
+
+function getNextPartition (p) {
+	// DS: adapted from https://bbzippo.wordpress.com/2009/12/18/integer-partitions/
+
+	//mutates the list p to produce the next partition in
+	// reverse lex order, first partition being a single number n,
+	// and the last one is n ones.
+	var len  = p.length;
+	//there is a tail of ones. count it and cut it off.
+	var tailLen = 0;
+	while(tailLen < len && p[len - tailLen - 1] == 1) {
+		p.splice(len - tailLen - 1, 1);
+		tailLen++;
+	}
+	if (p.length == 0) //all values were 1, this is the last partition
+		return null;
+	//all numbers in p are now > 1.
+	//decrement the last (smallest) element;
+	var cutValue = p[p.length - 1] - 1;
+	p[p.length - 1] = cutValue;
+
+	//now we have to add back all the 1s that we cut off
+	var remainder = tailLen + 1;
+	//append the 1s, clumped into groups of non-increasing size.
+	//e.g. 3,1,1,1,1 becomes 2,2,2,1 (which in turn will become 2,2,1,1,1).
+	while (remainder > 0) {
+		if (remainder > cutValue) {
+			p.push(cutValue);
+			remainder -= cutValue;
+		}
+		else {
+			p.push(remainder);
+			remainder = 0;
+		}
+	}
+	return p;
+}
+
+function getPartitionHistogram (p) {
+	var h = {};
+	for (var i=0; i<p.length; ++i) {
+		var num = p[i];
+		if (!(num in h)) {
+			h[num] = 0;
+		}
+		h[num] += 1;
+	}
+
+	return h;
+}
+
+function compareHistograms (h1, h2) {
+	for (var key in h1) {
+		if (!(key in h2) || h2[key] < h1[key]) {
+			return false;
+		}
+	}
+	return true;
+}
+
+function subtractString (inputChars, removeChars) {
+	for (var i=0; i<removeChars.length; ++i) {
+		inputChars = inputChars.replace(removeChars[i], "");
+	}
+
+	return normalizeInput(inputChars);
+}
+
+function getCombinations (str, n) {
+	if (n==str.length) {
+		return [str];
+	}
+	else if (n==1) {
+		return str.split("");
+	}
+	else {
+		var combinations = [];
+		for (var i=0; i<=str.length-n; ++i) {
+			var subCombinations = getCombinations(str.substr(i+1), n-1);
+			for(var j=0; j<subCombinations.length; ++j) {
+				combinations.push(str[i]+subCombinations[j]);
+			}
+		}
+
+		return combinations;
+	}
+}
+
+function getSubAnagrams (input, len, wordList) {
+	var subAnagrams = [];
+	var keys = {};
+	var combinations = getCombinations(input, len);
+	for (var i=0; i<combinations.length; ++i) {
+		var key = normalizeInput(combinations[i]);
+		if (!keys[key]) {
+			keys[key] = true;
+			if (key in wordList) {
+				subAnagrams = subAnagrams.concat(wordList[key]);
+			}
+		}
+	}
+	return subAnagrams;
+}
+
+function requireMinWord (p, min) {
+	for (var i=0; i<p.length; ++i) {
+		if (p[i]>=min) {
+			return true
+		}
+	}
+
+	return false;
+}
+
+function findFullAnagrams (input, partition, wordList) {
+	var anagrams = [];
+	var head = partition[0];
+	var headAnagrams = getSubAnagrams (input, head, wordList);
+	if (partition.length > 1) {
+		var tail = partition.slice(1);
+		for (var i=0; i<headAnagrams.length; ++i) {
+			var headAnagram = headAnagrams[i];
+			var remainder = subtractString(input, headAnagram);
+			var tailAnagrams = findFullAnagrams(remainder, tail, wordList);
+			for (var j=0; j<tailAnagrams.length; ++j) {
+				anagrams.push(headAnagram + " "+ tailAnagrams[j]);
+			}
+		}
+	}
+	else {
+		return headAnagrams;
+	}
+
+	return anagrams;
+}
+
+function prependWords (words, arr) {
+	var str = words + " " + arr.join(","+words+" ");
+	return str.split(",");
+}
+
+rootWordList = {};
+trie = null;
+fullAnagrams = [];
+overLimit = false;
+
+function doAnagramSearch (str, requiredWords) {
+	rootWordList = {};
+	fullAnagrams = [];
+	overLimit = false;
+	if(!trie) trie = new FrozenTrie(trieData.trie, trieData.directory, trieData.nodeCount);
+	var input = normalizeInput(str);
+	if (requiredWords) {
+		input = subtractString(input, normalizeInput(requiredWords));
+	}
+	getAnagrams("", input, rootWordList, trie.getRoot());
+
+	for (var p = [input.length]; p; p=getNextPartition(p)) {
+		var h = getPartitionHistogram(p);
+		var compatible = compareHistograms(h, rootWordList._wordLengths) && (input.length<10 || requireMinWord(p, 5));
+		if (compatible) {
+			var anagrams = findFullAnagrams(input, p, rootWordList);
+			if (anagrams.length) {
+				if (requiredWords) {
+					anagrams = prependWords(requiredWords, anagrams);
+				}
+				fullAnagrams = fullAnagrams.concat(anagrams);
+			}
+			if (fullAnagrams.length>10000) {
+				overLimit = true;
+				break;
+			}
+		}
+	}
+}
+
+function setPagination (min, max, output) {
+	var $ = jQuery;
+	var frm = output.form;
+	output.value = fullAnagrams.slice(min, max).join("\n");
+	$(output).scrollTop(0);
+	$(".prev", frm).prop("disabled", min==0);
+	$(".next", frm).prop("disabled", min>=fullAnagrams.length-100);
+
+	$(".pagination .min", frm).text(min+1);
+	$(".pagination .max", frm).text(Math.min(max, fullAnagrams.length));
+}
+
+jQuery(document).ready(function ($) {
+	$("form.anagrams").submit(function () {
+		doAnagramSearch(this.input.value, this.include_chars.value);
+		if (fullAnagrams.length > 100) {
+			$(".pagination .total", this).text(fullAnagrams.length);
+			$(".pagination .over", this).text(overLimit ? "over " : "");
+			$(".pagination", this).show();
+		}
+		else {
+			$(".pagination", this).hide();
+		}
+		setPagination(0, 100, this.output);
+		return false;
+	});
+
+	$(".pagination :button").click(function () {
+		var min = parseInt($(".pagination .min", this.form).text())-1;
+		var max = min+100;
+		var increment = $(this).hasClass("prev") ? -100 : 100;
+
+		setPagination(min+increment, max+increment, this.form.output);
+	});
+
+});
+
+</script>
+<style type="text/css">
+textarea {
+	display: block;
+	margin-top: 1em;
+	width: 500px;
+	height: 300px;
+}
+label {
+	display: block;
+	margin-bottom: .5em;
+}
+.pagination {
+	display: none;
+}
+
+</style>
+</head>
+<body>
+<h1>Anagram finder</h1>
+<form class="anagrams">
+<label><input type="text" name="input" /><br/>Input</label>
+<label><input type="text" name="include_chars" /><br/>Require word(s) (optional)</label>
+<input type="submit" value="Find anagrams" />
+<textarea name="output"></textarea>
+<div class="pagination">
+<p>Showing <span class="min"></span> to <span class="max"></span> of <span class="over"></span><span class="total"></span> anagrams.</p>
+<input type="button" class="prev" value="Previous"/> <input type="button" class="next" value="Next"/>
+</div>
+</form>
+</body>
+</html>
